@@ -1,98 +1,175 @@
-import { Image } from 'expo-image';
-import { Platform, StyleSheet } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { View, Text, FlatList, StyleSheet, ActivityIndicator } from 'react-native';
+import { useAuth } from '../../contexts/AuthContext';
+import { db } from '../../utils/firebaseConfig';
+import { collection, query, where, orderBy, onSnapshot } from 'firebase/firestore';
+import { Expense } from '../../types';
+import { PieChart } from 'react-native-chart-kit';
+import { Dimensions } from 'react-native';
 
-import { HelloWave } from '@/components/hello-wave';
-import ParallaxScrollView from '@/components/parallax-scroll-view';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { Link } from 'expo-router';
+const screenWidth = Dimensions.get('window').width;
 
-export default function HomeScreen() {
+export default function Dashboard() {
+  const { user } = useAuth();
+  const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!user) return;
+
+    const q = query(
+      collection(db, 'expenses'),
+      where('userId', '==', user.uid),
+      orderBy('date', 'desc')
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const fetchedExpenses: Expense[] = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      } as Expense));
+      setExpenses(fetchedExpenses);
+      setLoading(false);
+    });
+
+    return unsubscribe;
+  }, [user]);
+
+  const totalSpending = expenses.reduce((sum, expense) => sum + expense.amount, 0);
+
+  const chartData = expenses.reduce((acc: any[], expense) => {
+    const existingCategory = acc.find(item => item.name === expense.category);
+    if (existingCategory) {
+      existingCategory.population += expense.amount;
+    } else {
+      acc.push({
+        name: expense.category,
+        population: expense.amount,
+        color: getRandomColor(),
+        legendFontColor: "#7F7F7F",
+        legendFontSize: 15
+      });
+    }
+    return acc;
+  }, []);
+
+  function getRandomColor() {
+    const letters = '0123456789ABCDEF';
+    let color = '#';
+    for (let i = 0; i < 6; i++) {
+      color += letters[Math.floor(Math.random() * 16)];
+    }
+    return color;
+  }
+
+  if (loading) {
+    return <ActivityIndicator style={{ flex: 1 }} />;
+  }
+
   return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
-      headerImage={
-        <Image
-          source={require('@/assets/images/partial-react-logo.png')}
-          style={styles.reactLogo}
-        />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText type="title">Welcome!</ThemedText>
-        <HelloWave />
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 1: Try it</ThemedText>
-        <ThemedText>
-          Edit <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> to see changes.
-          Press{' '}
-          <ThemedText type="defaultSemiBold">
-            {Platform.select({
-              ios: 'cmd + d',
-              android: 'cmd + m',
-              web: 'F12',
-            })}
-          </ThemedText>{' '}
-          to open developer tools.
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <Link href="/modal">
-          <Link.Trigger>
-            <ThemedText type="subtitle">Step 2: Explore</ThemedText>
-          </Link.Trigger>
-          <Link.Preview />
-          <Link.Menu>
-            <Link.MenuAction title="Action" icon="cube" onPress={() => alert('Action pressed')} />
-            <Link.MenuAction
-              title="Share"
-              icon="square.and.arrow.up"
-              onPress={() => alert('Share pressed')}
-            />
-            <Link.Menu title="More" icon="ellipsis">
-              <Link.MenuAction
-                title="Delete"
-                icon="trash"
-                destructive
-                onPress={() => alert('Delete pressed')}
-              />
-            </Link.Menu>
-          </Link.Menu>
-        </Link>
+    <View style={styles.container}>
+      <View style={styles.summary}>
+        <Text style={styles.totalLabel}>Total Spending</Text>
+        <Text style={styles.totalAmount}>${totalSpending.toFixed(2)}</Text>
+      </View>
 
-        <ThemedText>
-          {`Tap the Explore tab to learn more about what's included in this starter app.`}
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 3: Get a fresh start</ThemedText>
-        <ThemedText>
-          {`When you're ready, run `}
-          <ThemedText type="defaultSemiBold">npm run reset-project</ThemedText> to get a fresh{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> directory. This will move the current{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> to{' '}
-          <ThemedText type="defaultSemiBold">app-example</ThemedText>.
-        </ThemedText>
-      </ThemedView>
-    </ParallaxScrollView>
+      {expenses.length > 0 && (
+        <View style={styles.chartContainer}>
+           <Text style={styles.sectionTitle}>Spending Habits</Text>
+           <PieChart
+            data={chartData}
+            width={screenWidth}
+            height={220}
+            chartConfig={{
+              backgroundColor: "#1cc910",
+              backgroundGradientFrom: "#eff3ff",
+              backgroundGradientTo: "#efefef",
+              decimalPlaces: 2,
+              color: (opacity = 1) => `rgba(0, 0, 0, ${opacity})`,
+              style: {
+                borderRadius: 16
+              },
+            }}
+            accessor={"population"}
+            backgroundColor={"transparent"}
+            paddingLeft={"15"}
+            center={[10, 0]}
+            absolute
+          />
+        </View>
+      )}
+
+      <Text style={styles.sectionTitle}>Recent Expenses</Text>
+      <FlatList
+        data={expenses}
+        keyExtractor={item => item.id}
+        renderItem={({ item }) => (
+          <View style={styles.expenseItem}>
+            <View>
+              <Text style={styles.expenseCategory}>{item.category}</Text>
+              <Text style={styles.expenseDate}>{new Date(item.date).toLocaleDateString()}</Text>
+            </View>
+            <Text style={styles.expenseAmount}>-${item.amount.toFixed(2)}</Text>
+          </View>
+        )}
+      />
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  titleContainer: {
-    flexDirection: 'row',
+  container: {
+    flex: 1,
+    padding: 20,
+    backgroundColor: '#f5f5f5',
+  },
+  summary: {
+    backgroundColor: '#fff',
+    padding: 20,
+    borderRadius: 10,
     alignItems: 'center',
-    gap: 8,
+    marginBottom: 20,
+    elevation: 2,
   },
-  stepContainer: {
-    gap: 8,
-    marginBottom: 8,
+  totalLabel: {
+    fontSize: 16,
+    color: '#666',
   },
-  reactLogo: {
-    height: 178,
-    width: 290,
-    bottom: 0,
-    left: 0,
-    position: 'absolute',
+  totalAmount: {
+    fontSize: 32,
+    fontWeight: 'bold',
+    color: '#e74c3c',
+  },
+  chartContainer: {
+    marginBottom: 20,
+    alignItems: 'center'
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 10,
+    marginTop: 10,
+  },
+  expenseItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    backgroundColor: '#fff',
+    padding: 15,
+    borderRadius: 8,
+    marginBottom: 10,
+    alignItems: 'center',
+  },
+  expenseCategory: {
+    fontWeight: 'bold',
+    fontSize: 16,
+  },
+  expenseDate: {
+    color: '#888',
+    fontSize: 12,
+  },
+  expenseAmount: {
+    color: '#e74c3c',
+    fontWeight: 'bold',
+    fontSize: 16,
   },
 });
